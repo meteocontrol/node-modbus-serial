@@ -17,37 +17,56 @@ var TcpPort = function(ip, options) {
     this.ip = ip;
     this.openFlag = false;
     this.callback = null;
+    this.bufferedData = new Buffer(0);
 
     // options
     if (typeof(options) == 'undefined') options = {};
     this.port = options.port || MODBUS_PORT; // modbus port
 
     // handle callback - call a callback function only once, for the first event
-    // it will triger
+    // it will trigger
     var handleCallback = function(had_error) {
         if (modbus.callback) {
             modbus.callback(had_error);
             modbus.callback = null;
         }
-    }
+    };
 
     // create a socket
     this._client = new net.Socket();
     this._client.on('data', function(data) {
+        // always buffer
+        Buffer.concat([modbus.bufferedData, data]);
+
+        // check data length
+        if (modbus.bufferedData.length < 6 + 3) return;
+
+        var expectedLength = 0;
+
+        if (modbus.bufferedData.readUInt16BE(7) > 0x80) {
+            // it's a modbus exception
+            expectedLength = 9
+        } else {
+            var transactionId = modbus.bufferedData.readUInt16BE(0);
+            expectedLength = modbus._transactions[transactionId].nextLength + 6 - 2;
+        }
+
+        if (modbus.bufferedData.length < expectedLength) return;
+
         var buffer;
         var crc;
 
-        // check data length
-        if (data.length < 6) return;
-
         // cut 6 bytes of mbap, copy pdu and add crc
-        buffer = new Buffer(data.length - 6 + 2);
-        data.copy(buffer, 0, 6);
+        buffer = new Buffer(expectedLength - 6 + 2);
+        modbus.bufferedData.copy(buffer, 0, 6);
         crc = crc16(buffer.slice(0, -2));
         buffer.writeUInt16LE(crc, buffer.length - 2);
 
         // update transaction id
-        modbus._transactionId = data.readUInt16BE(0)
+        modbus._transactionId = modbus.bufferedData.readUInt16BE(0);
+
+        // remove handled message from buffer
+        modbus.bufferedData = modbus.bufferedData.slice(expectedLength);
 
         // emit a data signal
         modbus.emit('data', buffer);
