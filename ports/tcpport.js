@@ -17,7 +17,9 @@ var TcpPort = function(ip, options) {
     this.ip = ip;
     this.openFlag = false;
     this.callback = null;
+    this.expectedLength = {};
     this.bufferedData = new Buffer(0);
+    this._transactionId = 0;
 
     // options
     if (typeof(options) == 'undefined') options = {};
@@ -36,19 +38,19 @@ var TcpPort = function(ip, options) {
     this._client = new net.Socket();
     this._client.on('data', function(data) {
         // always buffer
-        Buffer.concat([modbus.bufferedData, data]);
+        modbus.bufferedData = Buffer.concat([modbus.bufferedData, data]);
 
         // check data length
         if (modbus.bufferedData.length < 6 + 3) return;
 
         var expectedLength = 0;
 
-        if (modbus.bufferedData.readUInt16BE(7) > 0x80) {
+        if (modbus.bufferedData.readUInt8(7) > 0x80) {
             // it's a modbus exception
             expectedLength = 9
         } else {
             var transactionId = modbus.bufferedData.readUInt16BE(0);
-            expectedLength = modbus._transactions[transactionId].nextLength + 6 - 2;
+            expectedLength = modbus.expectedLength[transactionId] + 6;
         }
 
         if (modbus.bufferedData.length < expectedLength) return;
@@ -120,6 +122,7 @@ TcpPort.prototype.isOpen = function() {
 TcpPort.prototype.write = function (data) {
     // get next transaction id
     var transactionsId = (this._transactionId + 1) % MAX_TRANSACTIONS;
+    this.expectedLength[transactionsId] = 3 + data.readUInt16BE(4) * 2;
 
     // remove crc and add mbap
     var buffer = new Buffer(data.length + 6 - 2);
