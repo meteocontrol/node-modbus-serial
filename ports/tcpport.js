@@ -122,6 +122,11 @@ TcpPort.prototype.open = function (callback) {
  * Simulate successful close port
  */
 TcpPort.prototype.close = function (callback) {
+    if(this.openFlag === false) {
+        callback();
+        return;
+    }
+    
     this.callback = callback;
     this._client.end();
 };
