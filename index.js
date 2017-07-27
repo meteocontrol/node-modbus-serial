@@ -64,6 +64,16 @@ function _readFC4(data, next) {
     var length = data.readUInt8(2);
     var contents = [];
 
+    if (length > data.length) {
+      const error = "Data length error, expected " + length + " got " + data.length;
+
+      if (next) {
+        next(error);
+      }
+
+      return;
+    }
+
     for (var i = 0; i < length; i += 2) {
         var reg = data.readUInt16BE(i + 3);
         contents.push(reg);

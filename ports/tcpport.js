@@ -37,41 +37,15 @@ var TcpPort = function(ip, options) {
     // create a socket
     this._client = new net.Socket();
     this._client.on('data', function(data) {
-        // always buffer
-        modbus.bufferedData = Buffer.concat([modbus.bufferedData, data]);
-
-        // check data length
-        if (modbus.bufferedData.length < 6 + 3) return;
-
-        var expectedLength = 0;
-
-        if (modbus.bufferedData.readUInt8(7) > 0x80) {
-            // it's a modbus exception
-            expectedLength = 9
-        } else {
-            var transactionId = modbus.bufferedData.readUInt16BE(0);
-            expectedLength = modbus.expectedLength[transactionId] + 6;
-        }
-
-        if (modbus.bufferedData.length < expectedLength) return;
-
-        var buffer;
-        var crc;
-
-        // cut 6 bytes of mbap, copy pdu and add crc
-        buffer = new Buffer(expectedLength - 6 + 2);
-        modbus.bufferedData.copy(buffer, 0, 6);
-        crc = crc16(buffer.slice(0, -2));
-        buffer.writeUInt16LE(crc, buffer.length - 2);
-
-        // update transaction id
-        modbus._transactionId = modbus.bufferedData.readUInt16BE(0);
-
-        // remove handled message from buffer
-        modbus.bufferedData = modbus.bufferedData.slice(expectedLength);
-
-        // emit a data signal
-        modbus.emit('data', buffer);
+      try {
+        modbus.processData(data);
+      } catch (err) {
+        // if any error happens destroy the socket and close this port
+        modbus._client.destroy();
+        modbus.openFlag = false;
+        // make sure this socket is not reused as a new instance of port must be created
+        modbus._client = null;
+      }
     });
 
     this._client.on('connect', function() {
@@ -92,6 +66,49 @@ var TcpPort = function(ip, options) {
     EventEmitter.call(this);
 };
 util.inherits(TcpPort, EventEmitter);
+
+/**
+ * Simulate successful port open
+ */
+TcpPort.prototype.processData = function (data) {
+
+    // always buffer
+    this.bufferedData = Buffer.concat([this.bufferedData, data]);
+
+    // check data length
+    if (this.bufferedData.length < 6 + 3) return;
+
+    var expectedLength = 0;
+
+    if (this.bufferedData.readUInt8(7) > 0x80) {
+        // it's a modbus exception
+        expectedLength = 9
+    } else {
+        var transactionId = this.bufferedData.readUInt16BE(0);
+        expectedLength = this.expectedLength[transactionId] + 6;
+    }
+
+    if (this.bufferedData.length < expectedLength) return;
+
+    var buffer;
+    var crc;
+
+    // cut 6 bytes of mbap, copy pdu and add crc
+    buffer = new Buffer(expectedLength - 6 + 2);
+    this.bufferedData.copy(buffer, 0, 6);
+    crc = crc16(buffer.slice(0, -2));
+    buffer.writeUInt16LE(crc, buffer.length - 2);
+
+    // update transaction id
+    this._transactionId = this.bufferedData.readUInt16BE(0);
+
+    // remove handled message from buffer
+    this.bufferedData = this.bufferedData.slice(expectedLength);
+
+    // emit a data signal
+    this.emit('data', buffer);
+
+};
 
 /**
  * Simulate successful port open
